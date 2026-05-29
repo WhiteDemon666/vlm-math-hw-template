@@ -94,10 +94,17 @@ class MathVLMProcessor:
     def collate(self, batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
         """Pad text fields and stack pixel_values.
         """
-        input_ids = [item["input_ids"] for item in batch]
-        attention_mask = [item["attention_mask"] for item in batch]
-        labels = [item["labels"] for item in batch]
-        pixel_values = [item["pixel_values"] for item in batch]
+        processed_batch = []
+        for item in batch:
+            if isinstance(item, MathVQASample):
+                processed_batch.append(self(item))
+            else:
+                processed_batch.append(item)
+
+        input_ids = [item["input_ids"] for item in processed_batch]
+        attention_mask = [item["attention_mask"] for item in processed_batch]
+        labels = [item["labels"] for item in processed_batch]
+        pixel_values = [item["pixel_values"] for item in processed_batch]
 
         pad_id = self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else 0
 

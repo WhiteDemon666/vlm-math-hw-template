@@ -5,55 +5,55 @@
 Выбранный трек:
 
 ```text
-A / B / C
+A
 ```
 
 ## Что реализовано
 
-- [ ] dataset.py
-- [ ] processor.py
-- [ ] model.py
-- [ ] train.py
-- [ ] benchmark.py
+- [X] dataset.py
+- [X] processor.py
+- [X] model.py
+- [X] train.py
+- [X] benchmark.py
 
 ## Конфигурация
 
 ```text
-config path:
-seed:
-device:
-dtype:
-max_steps:
-batch size:
+config path: configs/track_a_cpu.yaml
+seed: 42
+device: cpu
+dtype: float32
+max_steps: 10
+batch size: 2
 ```
 
 ## Результаты
 
 ```text
-public tests:
-train loss:
-benchmark accuracy:
+public tests: 14/14
+train loss: 10.4462
+benchmark accuracy: 0
 ```
 
 ## Использованные ресурсы
 
 ```text
-CPU/GPU:
-VRAM:
-время обучения:
+CPU/GPU: CPU
+VRAM: 0 GB
+время обучения: 3 секунды
 ```
 
 ## Анализ ошибок
 
-Приведите 3 ошибки модели:
+Приведите 3 ошибки модели (путь А, поэтому модель не обучалась, так что в целом нечего писать, у модели фактически случайные веса, так что и ошибки случайные):
 
-1. ...
-2. ...
-3. ...
+1. Забыла выключить плиту
+2. Написала после всех переменных _gpt
+3. epsilont
 
 ## Комментарии
 
-Что оказалось самым сложным, что бы вы улучшили?
+Самое сложное было разобраться с размерностями тензоров, в общем все как обычно. Из улучшений можно было бы выбрать путь посложнее и нормально обучить модельку)
 
 
 ## Критерии оценивания

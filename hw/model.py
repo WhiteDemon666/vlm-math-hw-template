@@ -71,7 +71,7 @@ def merge_visual_embeddings(
     mask = (input_ids == image_token_id)
     merged_embeds = input_embeds.clone()
 
-    merged_embeds[mask] = visual_embeds.view(-1, visual_embeds.size(-1))
+    merged_embeds[mask] = visual_embeds.view(-1, visual_embeds.size(-1)).to(merged_embeds.dtype)
     return merged_embeds
 
 
