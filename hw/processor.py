@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
+import numpy as np
 from PIL import Image
 
 from hw.constants import IMAGE_END_TOKEN, IMAGE_START_TOKEN, IMAGE_TOKEN, IGNORE_INDEX
@@ -33,14 +34,14 @@ class MathVLMProcessor:
 
     def preprocess_image(self, image: Image.Image) -> torch.Tensor:
         """Convert image to tensor with shape [num_tiles, 3, image_size, image_size].
-
-        TODO:
-            - convert to RGB;
-            - resize/crop/pad;
-            - split into tiles if num_tiles > 1;
-            - normalize to float tensor.
         """
-        raise NotImplementedError("Implement image preprocessing")
+        image = image.resize((self.config.image_size, self.config.image_size))
+
+        img_arr = np.array(image)
+        tensor = torch.tensor(img_arr).permute(2, 0, 1).float()
+        tensor = tensor / 255.0
+
+        return tensor.unsqueeze(0)
 
     def build_prompt(self, sample: MathVQASample, include_answer: bool) -> str:
         """Build a text prompt with visual special tokens and options.
@@ -48,7 +49,15 @@ class MathVLMProcessor:
         For training, include_answer=True should append the assistant answer.
         For inference, include_answer=False should stop before the answer.
         """
-        raise NotImplementedError("Implement prompt construction")
+        img_tokens = IMAGE_TOKEN * self.config.num_image_tokens
+        pref = f"{IMAGE_START_TOKEN}{img_tokens}{IMAGE_END_TOKEN}\n"
+
+        text = "\n".join(sample.options) if sample.options else ""
+        prompt = f"{pref}Question: {sample.question}\nOptions:\n{text}\nAnswer:"
+        if include_answer:
+            prompt += f" {sample.answer}"
+
+        return prompt
 
     def tokenize_sample(self, sample: MathVQASample) -> dict[str, torch.Tensor]:
         """Return input_ids, attention_mask and labels for one sample.
@@ -56,7 +65,26 @@ class MathVLMProcessor:
         labels must be IGNORE_INDEX for prompt tokens and real token ids only
         for the assistant answer.
         """
-        raise NotImplementedError("Implement sample tokenization")
+        full_text = self.build_prompt(sample, include_answer=True)
+        prompt_text = self.build_prompt(sample, include_answer=False)
+
+        full_token = self.tokenizer(full_text, truncation=True,
+                                    max_length=self.config.max_length)
+        prompt_token = self.tokenizer(prompt_text, truncation=True,
+                                      max_length=self.config.max_length)
+
+        input_ids = torch.tensor(full_token["input_ids"], dtype=torch.long)
+        attention_mask = torch.tensor(full_token["attention_mask"], dtype=torch.long)
+        prompt_length = len(prompt_token["input_ids"])
+
+        labels = input_ids.clone()
+        labels[:prompt_length] = self.config.ignore_index
+
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": labels
+        }
 
     def __call__(self, sample: MathVQASample) -> dict[str, torch.Tensor]:
         item = self.tokenize_sample(sample)
@@ -65,11 +93,26 @@ class MathVLMProcessor:
 
     def collate(self, batch: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
         """Pad text fields and stack pixel_values.
-
-        TODO:
-            - pad input_ids with tokenizer.pad_token_id;
-            - pad attention_mask with 0;
-            - pad labels with ignore_index;
-            - stack pixel_values into [B, T, 3, H, W].
         """
-        raise NotImplementedError("Implement collate_fn")
+        input_ids = [item["input_ids"] for item in batch]
+        attention_mask = [item["attention_mask"] for item in batch]
+        labels = [item["labels"] for item in batch]
+        pixel_values = [item["pixel_values"] for item in batch]
+
+        pad_id = self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else 0
+
+        input_ids_padded = torch.nn.utils.rnn.pad_sequence(input_ids, batch_first=True,
+                                                           padding_value=pad_id)
+        attention_mask_padded = torch.nn.utils.rnn.pad_sequence(attention_mask, batch_first=True,
+                                                                padding_value=0)
+        labels_padded = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True,
+                                                        padding_value=self.config.ignore_index)
+
+        pixel_values_stacked = torch.stack(pixel_values, dim=0)
+
+        return {
+            "input_ids": input_ids_padded,
+            "attention_mask": attention_mask_padded,
+            "labels": labels_padded,
+            "pixel_values": pixel_values_stacked
+        }

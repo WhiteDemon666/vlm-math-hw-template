@@ -63,14 +63,6 @@ class MathVQADataset(Dataset[MathVQASample]):
 
     Expected manifest fields:
         id, split, image, question, options, answer, subject, source(optional)
-
-    TODO for students:
-        - read manifest;
-        - filter by split;
-        - support max_samples;
-        - resolve image paths relative to manifest directory;
-        - open images as RGB PIL.Image;
-        - return MathVQASample.
     """
 
     def __init__(
@@ -84,14 +76,29 @@ class MathVQADataset(Dataset[MathVQASample]):
         self.split = split
         self.max_samples = max_samples
 
-        # TODO: implement loading/filtering.
-        # Hint: use load_jsonl(self.manifest_path).
-        raise NotImplementedError("Implement MathVQADataset.__init__")
+        data = load_jsonl(self.manifest_path)
+
+        self.data = [row for row in data if row.get("split", "train") == self.split]
+
+        if self.max_samples is not None:
+            self.data = self.data[:self.max_samples]
 
     def __len__(self) -> int:
-        # TODO: return number of filtered rows.
-        raise NotImplementedError("Implement MathVQADataset.__len__")
+        return len(self.data)
 
     def __getitem__(self, idx: int) -> MathVQASample:
-        # TODO: construct and return MathVQASample.
-        raise NotImplementedError("Implement MathVQADataset.__getitem__")
+        row = self.data[idx]
+
+        img_path = self.root / row["image"]
+        image = Image.open(img_path).convert("RGB")
+        question = sanitize_question(row["question"])
+
+        return MathVQASample(
+            id=str(row.get("id", idx)),
+            image=image,
+            question=question,
+            options=row.get("options", []),
+            answer=row.get("answer", ""),
+            subject=row.get("subject", "unknown"),
+            source=row.get("source", "unknown")
+        )

@@ -29,13 +29,23 @@ class VisionToTextAdapter(nn.Module):
         self.text_hidden_size = text_hidden_size
         self.num_image_tokens = num_image_tokens
 
-        # TODO: replace with a small projection network.
-        # Recommended: LayerNorm -> Linear -> GELU -> Linear.
-        raise NotImplementedError("Implement VisionToTextAdapter.__init__")
+        self.proj = nn.Sequential(
+            nn.LayerNorm(vision_hidden_size),
+            nn.Linear(vision_hidden_size, text_hidden_size),
+            nn.GELU(),
+            nn.Linear(text_hidden_size, text_hidden_size)
+        )
 
     def forward(self, vision_hidden_states: torch.Tensor) -> torch.Tensor:
         """Return visual embeddings [B, num_image_tokens, text_hidden_size]."""
-        raise NotImplementedError("Implement VisionToTextAdapter.forward")
+        out = self.proj(vision_hidden_states)  # [B, seq_len, text_hidden_size]
+
+        if out.shape[1] != self.num_image_tokens:
+            out = out.transpose(1, 2)
+            out = torch.nn.functional.adaptive_avg_pool1d(out, self.num_image_tokens)
+            out = out.transpose(1, 2)  # [B, num_image_tokens, text_hidden_size]
+
+        return out
 
 
 def merge_visual_embeddings(
@@ -58,7 +68,11 @@ def merge_visual_embeddings(
     Assumption for public tests:
         each row has exactly K positions where input_ids == image_token_id.
     """
-    raise NotImplementedError("Implement visual/text embedding merge")
+    mask = (input_ids == image_token_id)
+    merged_embeds = input_embeds.clone()
+
+    merged_embeds[mask] = visual_embeds.view(-1, visual_embeds.size(-1))
+    return merged_embeds
 
 
 class MathVLM(nn.Module):
@@ -87,17 +101,47 @@ class MathVLM(nn.Module):
 
     def forward(self, batch: dict[str, torch.Tensor]) -> Any:
         """Forward pass with loss.
-
-        TODO:
-            - encode images;
-            - map to visual embeddings;
-            - get text input embeddings;
-            - merge visual/text embeddings;
-            - call language_model with inputs_embeds, attention_mask, labels.
         """
-        raise NotImplementedError("Implement MathVLM.forward")
+        b, t, c, h, w = batch["pixel_values"].shape
+        pixel_vals = batch["pixel_values"].view(b * t, c, h, w)
+        vision_outputs = self.vision_encoder(pixel_vals)
+        vision_hidden = vision_outputs.last_hidden_state if hasattr(vision_outputs,
+                                                                    "last_hidden_state") else vision_outputs
+
+        visual_embeds = self.adapter(vision_hidden)
+        input_embeds = self.language_model.get_input_embeddings()(batch["input_ids"])
+
+        merged_embeds = merge_visual_embeddings(
+            input_embeds=input_embeds,
+            input_ids=batch["input_ids"],
+            visual_embeds=visual_embeds,
+            image_token_id=self.config.image_token_id
+        )
+
+        return self.language_model(
+            inputs_embeds=merged_embeds,
+            attention_mask=batch["attention_mask"],
+            labels=batch.get("labels")
+        )
 
     @torch.no_grad()
     def generate(self, batch: dict[str, torch.Tensor], **generation_kwargs: Any) -> torch.Tensor:
         """Generate answer token ids."""
-        raise NotImplementedError("Implement MathVLM.generate")
+        b, t, c, h, w = batch["pixel_values"].shape
+        pixel_vals = batch["pixel_values"].view(b * t, c, h, w)
+        vision_outputs = self.vision_encoder(pixel_vals)
+        vision_hidden = vision_outputs.last_hidden_state if hasattr(vision_outputs,
+                                                                    "last_hidden_state") else vision_outputs
+
+        visual_embeds = self.adapter(vision_hidden)
+        input_embeds = self.language_model.get_input_embeddings()(batch["input_ids"])
+
+        merged_embeds = merge_visual_embeddings(
+            input_embeds, batch["input_ids"], visual_embeds, self.config.image_token_id
+        )
+
+        return self.language_model.generate(
+            inputs_embeds=merged_embeds,
+            attention_mask=batch["attention_mask"],
+            **generation_kwargs
+        )
